@@ -26,6 +26,7 @@ export const MISTAKES = ['Poor R/R', 'No Stop', 'Chase', 'Early Exit', 'Late Exi
 
 export interface Trade {
   id: string;
+  userId: string; // User isolation
   date: string; // ISO String
   pair: string;
   direction: Direction;
@@ -110,6 +111,7 @@ export interface CapitalSettings {
 // Watchlist & History
 export interface WatchlistItem {
   id: string;
+  userId: string; // User isolation
   pair: string;
   priority: number; // higher = more important
   notes?: string;
@@ -121,6 +123,7 @@ export interface WatchlistItem {
 
 export interface TradeHistoryEntry {
   id: string;
+  userId: string; // User isolation
   tradeId: string;
   timestamp: string;
   before: Trade;
@@ -142,8 +145,25 @@ export interface NewsEvent {
 }
 
 export interface User {
+  id: string;
   email: string;
   name: string;
+  passwordHash: string; // bcrypt hash in production
+  emailVerified: boolean;
+  verificationToken?: string;
+  verificationTokenExpiry?: string;
+  resetPasswordToken?: string;
+  resetPasswordTokenExpiry?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserSession {
+  userId: string;
+  email: string;
+  name: string;
+  token: string;
+  expiresAt: string;
 }
 
 export interface AuthState {
@@ -151,11 +171,17 @@ export interface AuthState {
   isAuthenticated: boolean;
 }
 
+export interface AuthError {
+  code: 'EMAIL_EXISTS' | 'INVALID_EMAIL' | 'WEAK_PASSWORD' | 'INVALID_CREDENTIALS' | 'EMAIL_NOT_VERIFIED' | 'TOKEN_EXPIRED' | 'TOKEN_INVALID' | 'ACCOUNT_NOT_FOUND';
+  message: string;
+}
+
 // Calculator Types
 export type CalculatorMode = 'PERCENT' | 'FIXED';
 
 export interface CalculatorEntry {
   id: string;
+  userId: string; // User isolation
   date: string;
   mode: CalculatorMode;
   balance: number;

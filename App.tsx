@@ -7,7 +7,8 @@ import { Journal } from './pages/Journal';
 import { Analytics } from './pages/Analytics';
 import { Capital } from './pages/Capital';
 import { Calculator } from './pages/Calculator';
-import { getTrades, saveTrade, deleteTrade, getCurrentUser } from './services/storage';
+import { getTrades, saveTrade, deleteTrade } from './services/storage';
+import { getCurrentUser, getCurrentSession } from './services/auth';
 import { Trade, User } from './types';
 
 function App() {
@@ -16,31 +17,46 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load initial data
-    const u = getCurrentUser();
-    if (u) setUser(u);
-    
-    const t = getTrades();
-    setTrades(t);
-    
+    // Check for valid session
+    const session = getCurrentSession();
+    if (session) {
+      const u = getCurrentUser();
+      if (u) {
+        setUser({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+        });
+        // Load user's trades
+        const userTrades = getTrades(u.id);
+        setTrades(userTrades);
+      }
+    }
     setLoading(false);
   }, []);
 
-  const handleLogin = (newUser: User) => {
+  const handleLogin = (newUser: { id: string; email: string; name: string }) => {
     setUser(newUser);
+    // Load user's trades after login
+    const userTrades = getTrades(newUser.id);
+    setTrades(userTrades);
   };
 
   const handleLogout = () => {
     setUser(null);
+    setTrades([]);
   };
 
   const handleSaveTrade = (trade: Trade) => {
+    if (!user) return;
+    trade.userId = user.id;
     const updatedTrades = saveTrade(trade);
     setTrades(updatedTrades);
   };
 
   const handleDeleteTrade = (id: string) => {
-    const updatedTrades = deleteTrade(id);
+    if (!user) return;
+    const updatedTrades = deleteTrade(id, user.id);
     setTrades(updatedTrades);
   };
 

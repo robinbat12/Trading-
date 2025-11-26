@@ -1,15 +1,30 @@
 import { Trade, Outcome, Direction, CalculatorEntry, CapitalSettings, CapitalStats, EquityPoint, WatchlistItem, TradeHistoryEntry } from '../types';
+import { getCurrentSession } from './auth';
 
 const STORAGE_KEY = 'trademind_trades';
-const USER_KEY = 'trademind_user';
 const CALC_KEY = 'trademind_calc_history';
 const CALC_SETTINGS_KEY = 'trademind_calc_settings';
 const CAPITAL_SETTINGS_KEY = 'trademind_capital_settings';
 const WATCHLIST_KEY = 'trademind_watchlist';
 const TRADE_HISTORY_KEY = 'trademind_trade_history';
 
-export const getTrades = (): Trade[] => {
-  const data = localStorage.getItem(STORAGE_KEY);
+// Helper to get current user ID
+const getCurrentUserId = (): string | null => {
+  const session = getCurrentSession();
+  return session?.userId || null;
+};
+
+// Get user-scoped storage key
+const getUserScopedKey = (baseKey: string, userId: string): string => {
+  return `${baseKey}_${userId}`;
+};
+
+export const getTrades = (userId?: string): Trade[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) return [];
+  
+  const key = getUserScopedKey(STORAGE_KEY, uid);
+  const data = localStorage.getItem(key);
   return data ? JSON.parse(data) : [];
 };
 
@@ -42,7 +57,11 @@ const detectMistakes = (trade: Trade, pastTrades: Trade[]): string[] => {
 };
 
 export const saveTrade = (trade: Trade): Trade[] => {
-  const currentTrades = getTrades();
+  const uid = trade.userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  trade.userId = uid;
+  const currentTrades = getTrades(uid);
   
   // Run Auto-Detection
   trade.mistakes = detectMistakes(trade, currentTrades);
@@ -53,17 +72,19 @@ export const saveTrade = (trade: Trade): Trade[] => {
   
   if (index >= 0) {
     // Save version history
-    const historyRaw = localStorage.getItem(TRADE_HISTORY_KEY);
+    const historyKey = getUserScopedKey(TRADE_HISTORY_KEY, uid);
+    const historyRaw = localStorage.getItem(historyKey);
     const history: TradeHistoryEntry[] = historyRaw ? JSON.parse(historyRaw) : [];
     const previous = currentTrades[index];
     const entry: TradeHistoryEntry = {
       id: crypto.randomUUID(),
+      userId: uid,
       tradeId: trade.id,
       timestamp: new Date().toISOString(),
       before: previous,
       after: trade,
     };
-    localStorage.setItem(TRADE_HISTORY_KEY, JSON.stringify([entry, ...history]));
+    localStorage.setItem(historyKey, JSON.stringify([entry, ...history]));
 
     newTrades = [...currentTrades];
     newTrades[index] = trade;
@@ -71,46 +92,72 @@ export const saveTrade = (trade: Trade): Trade[] => {
     newTrades = [trade, ...currentTrades];
   }
   
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(newTrades));
+  const key = getUserScopedKey(STORAGE_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(newTrades));
   return newTrades;
 };
 
-export const getTradeHistory = (tradeId?: string): TradeHistoryEntry[] => {
-  const data = localStorage.getItem(TRADE_HISTORY_KEY);
+export const getTradeHistory = (tradeId?: string, userId?: string): TradeHistoryEntry[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) return [];
+  
+  const historyKey = getUserScopedKey(TRADE_HISTORY_KEY, uid);
+  const data = localStorage.getItem(historyKey);
   const all: TradeHistoryEntry[] = data ? JSON.parse(data) : [];
   if (!tradeId) return all;
   return all.filter(h => h.tradeId === tradeId);
 };
 
-export const deleteTrade = (id: string): Trade[] => {
-  const currentTrades = getTrades();
+export const deleteTrade = (id: string, userId?: string): Trade[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const currentTrades = getTrades(uid);
   const newTrades = currentTrades.filter(t => t.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(newTrades));
+  const key = getUserScopedKey(STORAGE_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(newTrades));
   return newTrades;
 };
 
 // --- Calculator Storage ---
 
-export const getCalculatorHistory = (): CalculatorEntry[] => {
-  const data = localStorage.getItem(CALC_KEY);
+export const getCalculatorHistory = (userId?: string): CalculatorEntry[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) return [];
+  
+  const key = getUserScopedKey(CALC_KEY, uid);
+  const data = localStorage.getItem(key);
   return data ? JSON.parse(data) : [];
 };
 
 export const saveCalculatorEntry = (entry: CalculatorEntry): CalculatorEntry[] => {
-  const current = getCalculatorHistory();
+  const uid = entry.userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  entry.userId = uid;
+  const current = getCalculatorHistory(uid);
   // Keep only last 50 calculations
   const newHistory = [entry, ...current].slice(0, 50);
-  localStorage.setItem(CALC_KEY, JSON.stringify(newHistory));
+  const key = getUserScopedKey(CALC_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(newHistory));
   return newHistory;
 };
 
-export const getCalculatorSettings = () => {
-    const data = localStorage.getItem(CALC_SETTINGS_KEY);
-    return data ? JSON.parse(data) : null;
+export const getCalculatorSettings = (userId?: string) => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) return null;
+  
+  const key = getUserScopedKey(CALC_SETTINGS_KEY, uid);
+  const data = localStorage.getItem(key);
+  return data ? JSON.parse(data) : null;
 };
 
-export const saveCalculatorSettings = (settings: any) => {
-    localStorage.setItem(CALC_SETTINGS_KEY, JSON.stringify(settings));
+export const saveCalculatorSettings = (settings: any, userId?: string) => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const key = getUserScopedKey(CALC_SETTINGS_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(settings));
 };
 
 // Calculations Helper
@@ -173,8 +220,18 @@ export const getGroupedStats = (trades: Trade[], key: keyof Trade) => {
 
 // --- Capital Tracking & Growth ---
 
-export const getCapitalSettings = (): CapitalSettings => {
-  const data = localStorage.getItem(CAPITAL_SETTINGS_KEY);
+export const getCapitalSettings = (userId?: string): CapitalSettings => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) {
+    return {
+      startingBalance: 10000,
+      maxDrawdownAlertPct: 20,
+      defaultRiskPerTradePct: 1
+    };
+  }
+  
+  const key = getUserScopedKey(CAPITAL_SETTINGS_KEY, uid);
+  const data = localStorage.getItem(key);
   if (data) return JSON.parse(data);
   // Sensible defaults
   return {
@@ -184,8 +241,12 @@ export const getCapitalSettings = (): CapitalSettings => {
   };
 };
 
-export const saveCapitalSettings = (settings: CapitalSettings) => {
-  localStorage.setItem(CAPITAL_SETTINGS_KEY, JSON.stringify(settings));
+export const saveCapitalSettings = (settings: CapitalSettings, userId?: string) => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const key = getUserScopedKey(CAPITAL_SETTINGS_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(settings));
 };
 
 // Compute equity curve and capital stats from trades
@@ -289,20 +350,27 @@ export const computeCapitalStats = (trades: Trade[], settings: CapitalSettings):
 
 // --- Watchlist Storage ---
 
-export const getWatchlist = (): WatchlistItem[] => {
-  const data = localStorage.getItem(WATCHLIST_KEY);
+export const getWatchlist = (userId?: string): WatchlistItem[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) return [];
+  
+  const key = getUserScopedKey(WATCHLIST_KEY, uid);
+  const data = localStorage.getItem(key);
   return data ? JSON.parse(data) : [];
 };
 
 export const saveWatchlistItem = (item: Omit<WatchlistItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): WatchlistItem[] => {
-  const current = getWatchlist();
+  const uid = item.userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const current = getWatchlist(uid);
   const now = new Date().toISOString();
   let updated: WatchlistItem[];
 
   if (item.id) {
     updated = current.map((w) =>
       w.id === item.id
-        ? { ...w, ...item, updatedAt: now }
+        ? { ...w, ...item, userId: uid, updatedAt: now }
         : w
     );
   } else {
@@ -313,6 +381,7 @@ export const saveWatchlistItem = (item: Omit<WatchlistItem, 'id' | 'createdAt' |
         : 0;
     const created: WatchlistItem = {
       ...item,
+      userId: uid,
       id,
       createdAt: now,
       updatedAt: now,
@@ -321,19 +390,27 @@ export const saveWatchlistItem = (item: Omit<WatchlistItem, 'id' | 'createdAt' |
     updated = [...current, created];
   }
 
-  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
+  const key = getUserScopedKey(WATCHLIST_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(updated));
   return updated;
 };
 
-export const deleteWatchlistItem = (id: string): WatchlistItem[] => {
-  const current = getWatchlist();
+export const deleteWatchlistItem = (id: string, userId?: string): WatchlistItem[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const current = getWatchlist(uid);
   const updated = current.filter((w) => w.id !== id);
-  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
+  const key = getUserScopedKey(WATCHLIST_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(updated));
   return updated;
 };
 
-export const reorderWatchlist = (id: string, direction: 'up' | 'down'): WatchlistItem[] => {
-  const current = [...getWatchlist()].sort((a, b) => a.orderIndex - b.orderIndex);
+export const reorderWatchlist = (id: string, direction: 'up' | 'down', userId?: string): WatchlistItem[] => {
+  const uid = userId || getCurrentUserId();
+  if (!uid) throw new Error('User not authenticated');
+  
+  const current = [...getWatchlist(uid)].sort((a, b) => a.orderIndex - b.orderIndex);
   const index = current.findIndex((w) => w.id === id);
   if (index === -1) return current;
 
@@ -345,22 +422,19 @@ export const reorderWatchlist = (id: string, direction: 'up' | 'down'): Watchlis
   current[swapWith].orderIndex = tmp;
 
   const updated = [...current].sort((a, b) => a.orderIndex - b.orderIndex);
-  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
+  const key = getUserScopedKey(WATCHLIST_KEY, uid);
+  localStorage.setItem(key, JSON.stringify(updated));
   return updated;
 };
 
-// Mock Auth
-export const loginUser = (email: string) => {
-  const user = { email, name: email.split('@')[0] };
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-  return user;
-};
+// Auth functions moved to services/auth.ts
+// These are kept for backward compatibility but redirect to auth service
+import { getCurrentUser as getCurrentUserFromAuth, logout as logoutFromAuth } from './auth';
 
 export const logoutUser = () => {
-  localStorage.removeItem(USER_KEY);
+  logoutFromAuth();
 };
 
 export const getCurrentUser = () => {
-  const u = localStorage.getItem(USER_KEY);
-  return u ? JSON.parse(u) : null;
+  return getCurrentUserFromAuth();
 };
