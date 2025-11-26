@@ -10,6 +10,14 @@ export enum Outcome {
   OPEN = 'Open'
 }
 
+export type TradeStatus =
+  | 'Open'
+  | 'Closed'
+  | 'Missed'
+  | 'Invalidated'
+  | 'BreakEven'
+  | 'Partial';
+
 // New Edge Module Types
 export const STANDARD_SETUPS = ['Breakout', 'Pullback', 'Reversal', 'Trend Continuation', 'Range Play', 'News', 'Scalp'];
 export const TIMEFRAMES = ['1M', '5M', '15M', '30M', '1H', '4H', 'D', 'W'];
@@ -43,6 +51,17 @@ export interface Trade {
   rMultiple?: number;
   outcome: Outcome;
   duration?: string;
+  // Capital module
+  capitalImpacting?: boolean;
+  // Journal / lifecycle
+  status?: TradeStatus;
+  reasonForExit?: string;
+  beforeScreenshotUrl?: string;
+  afterScreenshotUrl?: string;
+  mediaUrl?: string;
+  fromWatchlist?: boolean;
+  newsAffected?: boolean;
+  newsEventIds?: string[];
 }
 
 export interface TradeStats {
@@ -53,6 +72,73 @@ export interface TradeStats {
   profitFactor: number;
   bestTrade: number;
   worstTrade: number;
+}
+
+// Capital & Risk Module
+export interface EquityPoint {
+  date: string; // ISO or label
+  equity: number;
+  realizedPnL: number;
+  unrealizedPnL: number;
+}
+
+export interface StreakStats {
+  maxWinStreak: number;
+  maxLossStreak: number;
+}
+
+export interface CapitalStats {
+  startingBalance: number;
+  currentBalance: number;
+  realizedPnL: number;
+  unrealizedPnL: number;
+  netGrowthPct: number;
+  maxDrawdown: number;
+  maxDrawdownPct: number;
+  avgRPerTrade: number;
+  sharpeRatio?: number;
+  equityCurve: EquityPoint[];
+  streaks: StreakStats;
+}
+
+export interface CapitalSettings {
+  startingBalance: number;
+  maxDrawdownAlertPct: number; // e.g. 20 = alert at -20% DD
+  defaultRiskPerTradePct?: number;
+}
+
+// Watchlist & History
+export interface WatchlistItem {
+  id: string;
+  pair: string;
+  priority: number; // higher = more important
+  notes?: string;
+  preferredSetups: string[];
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TradeHistoryEntry {
+  id: string;
+  tradeId: string;
+  timestamp: string;
+  before: Trade;
+  after: Trade;
+}
+
+export type NewsImpactLevel = 'high' | 'medium' | 'low';
+
+export interface NewsEvent {
+  news_id: string;
+  title: string;
+  description: string;
+  timestamp: string; // ISO
+  impact_level: NewsImpactLevel;
+  affected_assets: string[]; // e.g. ['EURUSD', 'DXY']
+  source: string;
+  fetched_at: string;
+  notified: boolean;
 }
 
 export interface User {

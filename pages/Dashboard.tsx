@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
     TrendingUp, 
@@ -7,17 +7,23 @@ import {
     Activity, 
     Plus,
     ArrowUpRight,
-    ArrowDownRight
+    ArrowDownRight,
+    Bell
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { Trade, TradeStats, Outcome } from '../types';
+import { Trade, TradeStats, Outcome, NewsEvent } from '../types';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { getUpcomingNews, getNewsRelevantToWatchlist, getImpactColor, markNewsNotified } from '../services/news';
 
 interface DashboardProps {
   trades: Trade[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
+  const [upcomingNews, setUpcomingNews] = useState<NewsEvent[]>([]);
+  const [watchlistNews, setWatchlistNews] = useState<NewsEvent[]>([]);
+  const [alertEvents, setAlertEvents] = useState<NewsEvent[]>([]);
+
   const stats: TradeStats = useMemo(() => {
     const closedTrades = trades.filter(t => t.outcome !== Outcome.OPEN);
     const wins = closedTrades.filter(t => t.outcome === Outcome.WIN);
@@ -41,6 +47,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
       worstTrade: Math.min(...closedTrades.map(t => t.pnl || 0), 0),
     };
   }, [trades]);
+
+  // Load news and lightweight alerts
+  useEffect(() => {
+    const load = () => {
+      const list = getUpcomingNews(48);
+      setUpcomingNews(list);
+      setWatchlistNews(getNewsRelevantToWatchlist());
+
+      const now = Date.now();
+      const soonWindow = 60 * 60 * 1000; // 1h
+      const soonHighImpact = list.filter((e) => {
+        const t = new Date(e.timestamp).getTime();
+        return e.impact_level === 'high' && t - now > 0 && t - now <= soonWindow && !e.notified;
+      });
+      if (soonHighImpact.length) {
+        setAlertEvents(soonHighImpact);
+        markNewsNotified(soonHighImpact.map((e) => e.news_id));
+      }
+    };
+    load();
+    const id = window.setInterval(load, 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Equity Curve Data
   const chartData = useMemo(() => {
@@ -122,6 +151,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
         />
       </div>
 
+      {/* High-impact news alert strip */}
+      {alertEvents.length > 0 && (
+        <div className="bg-amber-950/70 border border-amber-500/40 rounded-xl p-3 flex items-center gap-3">
+          <Bell className="w-4 h-4 text-amber-400" />
+          <div className="flex-1 text-xs text-amber-100">
+            High-impact news approaching:{' '}
+            {alertEvents.map((e, idx) => (
+              <span key={e.news_id}>
+                {idx > 0 && ', '}
+                {e.title} (
+                {new Date(e.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                )
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Equity Curve */}
         <div className="lg:col-span-2 bg-slate-900 rounded-xl border border-slate-800 p-6">
@@ -170,6 +220,72 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
                 ))}
                 {trades.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No trades logged yet.</p>}
             </div>
+        </div>
+
+        {/* Upcoming News */}
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 lg:col-span-1">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Upcoming News (48h)</h3>
+            <span className="text-xs text-slate-500">
+              {watchlistNews.length ? 'Watchlist-aware' : 'Global'}
+            </span>
+          </div>
+          {upcomingNews.length === 0 ? (
+            <p className="text-sm text-slate-500">No upcoming events loaded.</p>
+          ) : (
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              {upcomingNews.slice(0, 8).map((event) => {
+                const localTime = new Date(event.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                const localDate = new Date(event.timestamp).toLocaleDateString();
+                const isWatchlist =
+                  watchlistNews.findIndex((w) => w.news_id === event.news_id) !== -1;
+                const impactColor = getImpactColor(event.impact_level);
+                return (
+                  <div
+                    key={event.news_id}
+                    className={`border border-slate-800 rounded-lg p-3 text-xs hover:border-slate-700 transition-colors ${
+                      isWatchlist ? 'bg-emerald-500/5' : 'bg-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full"
+                          style={{ backgroundColor: impactColor }}
+                        />
+                        <span className="font-medium text-slate-100 truncate max-w-[140px]">
+                          {event.title}
+                        </span>
+                      </div>
+                      <span className="text-slate-500">
+                        {localDate} {localTime}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                        {event.impact_level.toUpperCase()}
+                      </span>
+                      <span className="text-slate-400">
+                        {event.affected_assets.join(', ')}
+                      </span>
+                      {isWatchlist && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
+                          On Watchlist
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">
+                      {event.description}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-600">Source: {event.source}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

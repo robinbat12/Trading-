@@ -4,7 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TradeMind</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="icon"
+    type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' ry='6' fill='%230f172a'/%3E%3Cpath d='M7 22 L13 10 L19 22 L25 10' fill='none' stroke='%2310b981' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+  />
+  <script>
+    (function () {
+      if (typeof window === 'undefined' || !('MutationObserver' in window)) return;
+      var OriginalObserver = window.MutationObserver;
+      window.MutationObserver = function (callback) {
+        var observer = new OriginalObserver(callback);
+        var originalObserve = observer.observe;
+        observer.observe = function (target, options) {
+          try {
+            return originalObserve.call(observer, target, options);
+          } catch (e) {
+            console.warn('MutationObserver.observe error swallowed:', e, target, options);
+            return;
+          }
+        };
+        return observer;
+      };
+      window.MutationObserver.prototype = OriginalObserver.prototype;
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
       body {
@@ -45,5 +70,6 @@
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>

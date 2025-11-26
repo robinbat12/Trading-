@@ -5,6 +5,7 @@ import { Auth } from './pages/Auth';
 import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
 import { Analytics } from './pages/Analytics';
+import { Capital } from './pages/Capital';
 import { Calculator } from './pages/Calculator';
 import { getTrades, saveTrade, deleteTrade, getCurrentUser } from './services/storage';
 import { Trade, User } from './types';
@@ -55,6 +56,8 @@ function App() {
         <Route path="/journal" element={user ? <Layout user={user} onLogout={handleLogout}><Journal trades={trades} onSave={handleSaveTrade} onDelete={handleDeleteTrade} /></Layout> : <Navigate to="/auth" />} />
 
         <Route path="/calculator" element={user ? <Layout user={user} onLogout={handleLogout}><Calculator /></Layout> : <Navigate to="/auth" />} />
+        
+        <Route path="/capital" element={user ? <Layout user={user} onLogout={handleLogout}><Capital trades={trades} /></Layout> : <Navigate to="/auth" />} />
         
         <Route path="/analytics" element={user ? <Layout user={user} onLogout={handleLogout}><Analytics trades={trades} /></Layout> : <Navigate to="/auth" />} />
       </Routes>

@@ -3,8 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, Download, Trash2, Edit2, ExternalLink, ChevronDown, Tag, Clock, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input, Select, Textarea, TagSelector } from '../components/ui/Input';
-import { Trade, Direction, Outcome, STANDARD_SETUPS, TIMEFRAMES, EMOTIONS, MISTAKES } from '../types';
+import { Trade, Direction, Outcome, STANDARD_SETUPS, TIMEFRAMES, EMOTIONS, MISTAKES, TradeStatus } from '../types';
 import { calculateTradeMetrics } from '../services/storage';
+import { findNewsForTrade } from '../services/news';
 
 interface JournalProps {
   trades: Trade[];
@@ -18,6 +19,8 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOutcome, setFilterOutcome] = useState('All');
   const [filterSetup, setFilterSetup] = useState('All');
+  const [filterCapitalImpact, setFilterCapitalImpact] = useState<'All' | 'Impacting' | 'Excluded'>('All');
+  const [filterFromWatchlist, setFilterFromWatchlist] = useState<'All' | 'Watchlist' | 'Manual'>('All');
   
   // Form State
   const initialFormState: Partial<Trade> = {
@@ -27,9 +30,12 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
     setups: [],
     timeframes: [],
     emotions: [],
-    mistakes: []
+    mistakes: [],
+    capitalImpacting: true,
+    status: 'Open'
   };
   const [formData, setFormData] = useState<Partial<Trade>>(initialFormState);
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
 
   // Effect to handle URL params (from Calculator or New button)
   useEffect(() => {
@@ -73,6 +79,11 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
         Number(formData.positionSize)
     );
 
+    // News tagging
+    const newsEvents = formData.pair && formData.date
+      ? findNewsForTrade(formData.pair, formData.date)
+      : [];
+
     const newTrade: Trade = {
         id: formData.id || crypto.randomUUID(),
         date: formData.date!,
@@ -92,17 +103,28 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
         timeframes: formData.timeframes || [],
         emotions: formData.emotions || [],
         mistakes: formData.mistakes || [],
+        capitalImpacting: formData.capitalImpacting !== false,
+        status: (formData.status as TradeStatus) || 'Open',
+        reasonForExit: formData.reasonForExit || '',
+        beforeScreenshotUrl: formData.beforeScreenshotUrl,
+        afterScreenshotUrl: formData.afterScreenshotUrl,
+        mediaUrl: formData.mediaUrl,
+        fromWatchlist: formData.fromWatchlist || false,
+        newsAffected: newsEvents.length > 0,
+        newsEventIds: newsEvents.map((n) => n.news_id),
         ...metrics
     };
 
     onSave(newTrade);
     setIsFormOpen(false);
     setFormData(initialFormState);
+    setEditingTrade(null);
     setSearchParams({}); // Clear params
   };
 
   const handleEdit = (trade: Trade) => {
       setFormData(trade);
+      setEditingTrade(trade);
       setIsFormOpen(true);
   };
 
@@ -111,7 +133,21 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
       const matchesSearch = t.pair.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesOutcome = filterOutcome === 'All' || t.outcome === filterOutcome;
       const matchesSetup = filterSetup === 'All' || (t.setups && t.setups.includes(filterSetup));
-      return matchesSearch && matchesOutcome && matchesSetup;
+      const impacting = t.capitalImpacting !== false; // default true when undefined
+      const matchesCapital =
+        filterCapitalImpact === 'All'
+          ? true
+          : filterCapitalImpact === 'Impacting'
+          ? impacting
+          : !impacting;
+      const fromWatch = t.fromWatchlist === true;
+      const matchesWatch =
+        filterFromWatchlist === 'All'
+          ? true
+          : filterFromWatchlist === 'Watchlist'
+          ? fromWatch
+          : !fromWatch;
+      return matchesSearch && matchesOutcome && matchesSetup && matchesCapital && matchesWatch;
   }).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -157,6 +193,26 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
             ]}
             value={filterSetup}
             onChange={(e) => setFilterSetup(e.target.value)}
+            className="md:w-48"
+          />
+          <Select
+            options={[
+              { value: 'All', label: 'All Trades' },
+              { value: 'Impacting', label: 'Capital-Impacting Only' },
+              { value: 'Excluded', label: 'Excluded from Capital' },
+            ]}
+            value={filterCapitalImpact}
+            onChange={(e) => setFilterCapitalImpact(e.target.value as any)}
+            className="md:w-56"
+          />
+          <Select
+            options={[
+              { value: 'All', label: 'All Sources' },
+              { value: 'Watchlist', label: 'From Watchlist' },
+              { value: 'Manual', label: 'Manual Only' },
+            ]}
+            value={filterFromWatchlist}
+            onChange={(e) => setFilterFromWatchlist(e.target.value as any)}
             className="md:w-48"
           />
       </div>
@@ -274,6 +330,44 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <Input label="Screenshot URL" name="screenshotUrl" value={formData.screenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
                             <Input label="TradingView Link" name="tradingViewUrl" value={formData.tradingViewUrl || ''} onChange={handleInputChange} placeholder="https://tradingview.com/..." />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <Input label="Before Screenshot URL" name="beforeScreenshotUrl" value={formData.beforeScreenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
+                            <Input label="After Screenshot URL" name="afterScreenshotUrl" value={formData.afterScreenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <Textarea label="Reason for Exit" name="reasonForExit" rows={3} value={formData.reasonForExit || ''} onChange={handleInputChange} placeholder="Why you closed or adjusted the trade..." />
+                            <Input label="Media Link (Video/Other)" name="mediaUrl" value={formData.mediaUrl || ''} onChange={handleInputChange} placeholder="https://..." />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <Select
+                            label="Status"
+                            name="status"
+                            value={formData.status || 'Open'}
+                            onChange={handleInputChange}
+                            options={[
+                              { value: 'Open', label: 'Open' },
+                              { value: 'Closed', label: 'Closed' },
+                              { value: 'Missed', label: 'Missed' },
+                              { value: 'Invalidated', label: 'Invalidated' },
+                              { value: 'BreakEven', label: 'Break-even' },
+                              { value: 'Partial', label: 'Partial Close' },
+                            ]}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 pt-2">
+                          <input
+                            id="capitalImpacting"
+                            type="checkbox"
+                            checked={formData.capitalImpacting !== false}
+                            onChange={(e) =>
+                              setFormData(prev => ({ ...prev, capitalImpacting: e.target.checked }))
+                            }
+                            className="mr-2 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <label htmlFor="capitalImpacting" className="text-xs text-slate-400">
+                            Include this trade in capital & growth stats
+                          </label>
                         </div>
                     </div>
 
