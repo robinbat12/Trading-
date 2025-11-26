@@ -384,3 +384,4 @@ export const Capital: React.FC<CapitalProps> = ({ trades }) => {
 };
 
 
+

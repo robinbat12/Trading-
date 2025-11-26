@@ -134,3 +134,4 @@ export const findNewsForTrade = (pair: string, isoTime: string): NewsEvent[] => 
 };
 
 
+
