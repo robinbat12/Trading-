@@ -54,7 +54,7 @@ function App() {
         
         <Route path="/journal" element={user ? <Layout user={user} onLogout={handleLogout}><Journal trades={trades} onSave={handleSaveTrade} onDelete={handleDeleteTrade} /></Layout> : <Navigate to="/auth" />} />
 
-        <Route path="/calculator" element={user ? <Layout user={user} onLogout={handleLogout}><Calculator /></Layout> : <Navigate to="/auth" />} />
+        <Route path="/calculator" element={user ? <Layout user={user} onLogout={handleLogout}><Calculator trades={trades} /></Layout> : <Navigate to="/auth" />} />
         
         <Route path="/analytics" element={user ? <Layout user={user} onLogout={handleLogout}><Analytics trades={trades} /></Layout> : <Navigate to="/auth" />} />
       </Routes>

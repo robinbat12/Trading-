@@ -12,12 +12,14 @@ import {
     Wallet,
     Edit2,
     Check,
-    X
+    X,
+    ShieldAlert,
+    EyeOff
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Trade, TradeStats, Outcome, UserSettings } from '../types';
-import { getGlobalStats, getUserSettings, saveUserSettings } from '../services/storage';
+import { getGlobalStats, getUserSettings, saveUserSettings, checkRiskRules } from '../services/storage';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface DashboardProps {
@@ -25,16 +27,31 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
-  const [settings, setSettings] = useState<UserSettings>({ initialCapital: 10000, currency: 'USD' });
+  const [settings, setSettings] = useState<UserSettings>({ 
+      initialCapital: 10000, 
+      currency: 'USD', 
+      maxDailyLoss: 0, 
+      maxWeeklyLoss: 0 
+  });
   const [isEditingCapital, setIsEditingCapital] = useState(false);
+  const [isEditingRisk, setIsEditingRisk] = useState(false);
+  
+  // Edit States
   const [editedCapital, setEditedCapital] = useState('');
+  const [editedDailyRisk, setEditedDailyRisk] = useState('');
+  const [editedWeeklyRisk, setEditedWeeklyRisk] = useState('');
 
   // Load settings on mount
   useEffect(() => {
-    setSettings(getUserSettings());
+    const s = getUserSettings();
+    setSettings(s);
+    setEditedDailyRisk(s.maxDailyLoss.toString());
+    setEditedWeeklyRisk(s.maxWeeklyLoss.toString());
   }, []);
 
   const stats: TradeStats = useMemo(() => getGlobalStats(trades), [trades]);
+
+  const missedCount = useMemo(() => trades.filter(t => t.outcome === Outcome.MISSED).length, [trades]);
 
   const currentCapital = useMemo(() => {
     return settings.initialCapital + stats.grossPnL;
@@ -45,16 +62,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
     return ((stats.grossPnL / settings.initialCapital) * 100).toFixed(2);
   }, [stats.grossPnL, settings.initialCapital]);
 
+  // Risk Alerts
+  const riskViolations = useMemo(() => checkRiskRules(trades, settings), [trades, settings]);
+
   // Equity Curve Data
   const chartData = useMemo(() => {
       let runningBalance = settings.initialCapital;
-      // Start point
       const data = [
           { date: 'Start', balance: settings.initialCapital, pnl: 0 }
       ];
       
       const sortedTrades = [...trades]
-        .filter(t => t.outcome !== Outcome.OPEN)
+        .filter(t => t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED)
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       sortedTrades.forEach(t => {
@@ -76,6 +95,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
         setSettings(saveUserSettings(newSettings));
         setIsEditingCapital(false);
     }
+  };
+
+  const handleSaveRisk = () => {
+      const d = parseFloat(editedDailyRisk) || 0;
+      const w = parseFloat(editedWeeklyRisk) || 0;
+      const newSettings = { ...settings, maxDailyLoss: d, maxWeeklyLoss: w };
+      setSettings(saveUserSettings(newSettings));
+      setIsEditingRisk(false);
   };
 
   const startEditingCapital = () => {
@@ -105,6 +132,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
 
   return (
     <div className="space-y-8">
+      {/* Risk Alert Banner */}
+      {riskViolations.length > 0 && (
+          <div className="bg-rose-600/10 border border-rose-600/50 p-4 rounded-xl flex items-start gap-3 animate-pulse">
+              <ShieldAlert className="w-6 h-6 text-rose-500 mt-0.5" />
+              <div>
+                  <h3 className="text-rose-500 font-bold">Risk Rule Breach Detected</h3>
+                  <ul className="list-disc list-inside text-rose-400 text-sm mt-1">
+                      {riskViolations.map((v, i) => (
+                          <li key={i}>{v.rule} Exceeded: Current {v.current.toFixed(2)} (Limit: -{v.limit})</li>
+                      ))}
+                  </ul>
+                  <p className="text-rose-400/80 text-xs mt-2 font-medium uppercase tracking-wide">Stop trading immediately and review your plan.</p>
+              </div>
+          </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Dashboard</h2>
@@ -119,61 +162,93 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
       </div>
 
       {/* Capital Overview Section */}
-      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-          <div className="p-6 border-b border-slate-800 bg-slate-950/30">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Wallet className="w-5 h-5 text-emerald-500" /> Capital Management
-              </h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-800">
-              {/* Initial Capital */}
-              <div className="p-6">
-                  <p className="text-slate-400 text-sm font-medium mb-1">Initial Capital</p>
-                  <div className="flex items-center gap-3 h-10">
-                      {isEditingCapital ? (
-                          <div className="flex items-center gap-2 w-full">
-                              <Input 
-                                autoFocus
-                                type="number" 
-                                value={editedCapital} 
-                                onChange={(e) => setEditedCapital(e.target.value)}
-                                className="h-8 py-1"
-                              />
-                              <button onClick={handleSaveCapital} className="p-1.5 bg-emerald-600 rounded text-white hover:bg-emerald-500"><Check className="w-4 h-4"/></button>
-                              <button onClick={() => setIsEditingCapital(false)} className="p-1.5 bg-slate-700 rounded text-white hover:bg-slate-600"><X className="w-4 h-4"/></button>
-                          </div>
-                      ) : (
-                          <div className="flex items-center gap-3 group w-full">
-                              <span className="text-2xl font-bold text-white">${settings.initialCapital.toLocaleString()}</span>
-                              <button onClick={startEditingCapital} className="text-slate-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity ml-auto md:ml-2">
-                                  <Edit2 className="w-4 h-4" />
-                              </button>
-                          </div>
-                      )}
-                  </div>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-800 bg-slate-950/30">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-emerald-500" /> Capital Management
+                </h3>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-slate-800">
+                {/* Initial Capital */}
+                <div className="p-6">
+                    <p className="text-slate-400 text-sm font-medium mb-1">Initial Capital</p>
+                    <div className="flex items-center gap-3 h-10">
+                        {isEditingCapital ? (
+                            <div className="flex items-center gap-2 w-full">
+                                <Input 
+                                    autoFocus
+                                    type="number" 
+                                    value={editedCapital} 
+                                    onChange={(e) => setEditedCapital(e.target.value)}
+                                    className="h-8 py-1"
+                                />
+                                <button onClick={handleSaveCapital} className="p-1.5 bg-emerald-600 rounded text-white hover:bg-emerald-500"><Check className="w-4 h-4"/></button>
+                                <button onClick={() => setIsEditingCapital(false)} className="p-1.5 bg-slate-700 rounded text-white hover:bg-slate-600"><X className="w-4 h-4"/></button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-3 group w-full">
+                                <span className="text-2xl font-bold text-white">${settings.initialCapital.toLocaleString()}</span>
+                                <button onClick={startEditingCapital} className="text-slate-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity ml-auto md:ml-2">
+                                    <Edit2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
 
-              {/* Realized PnL */}
-              <div className="p-6">
-                  <p className="text-slate-400 text-sm font-medium mb-1">Realized PnL</p>
-                  <div className="h-10 flex items-center">
-                      <span className={`text-2xl font-bold ${stats.grossPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                          {stats.grossPnL >= 0 ? '+' : ''}${stats.grossPnL.toLocaleString()}
-                      </span>
-                      <span className={`ml-3 text-sm px-2 py-0.5 rounded-full ${Number(roi) >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                          {Number(roi) >= 0 ? '+' : ''}{roi}% ROI
-                      </span>
-                  </div>
-              </div>
+                {/* Current Capital */}
+                <div className="p-6 bg-slate-800/20">
+                    <p className="text-slate-400 text-sm font-medium mb-1">Current Balance</p>
+                    <div className="h-10 flex items-center">
+                        <span className="text-3xl font-bold text-white">${currentCapital.toLocaleString()}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-              {/* Current Capital */}
-              <div className="p-6 bg-slate-800/20">
-                  <p className="text-slate-400 text-sm font-medium mb-1">Current Balance</p>
-                  <div className="h-10 flex items-center">
-                      <span className="text-3xl font-bold text-white">${currentCapital.toLocaleString()}</span>
-                  </div>
-              </div>
-          </div>
+        {/* Risk Rules Section */}
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-800 bg-slate-950/30 flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-rose-500" /> Risk Rules
+                </h3>
+                {!isEditingRisk ? (
+                     <button onClick={() => setIsEditingRisk(true)} className="text-xs text-slate-400 hover:text-white flex items-center gap-1">
+                         <Edit2 className="w-3 h-3" /> Edit Limits
+                     </button>
+                ) : (
+                    <div className="flex gap-2">
+                        <button onClick={handleSaveRisk} className="text-xs text-emerald-500 hover:text-emerald-400 font-bold">Save</button>
+                        <button onClick={() => setIsEditingRisk(false)} className="text-xs text-slate-400 hover:text-white">Cancel</button>
+                    </div>
+                )}
+            </div>
+            <div className="p-6 grid grid-cols-2 gap-6">
+                 <div>
+                     <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Max Daily Loss</p>
+                     {isEditingRisk ? (
+                         <div className="relative">
+                             <Input type="number" value={editedDailyRisk} onChange={(e) => setEditedDailyRisk(e.target.value)} placeholder="0" className="pl-6" />
+                             <span className="absolute left-2.5 top-2 text-slate-500">$</span>
+                         </div>
+                     ) : (
+                         <span className="text-xl font-medium text-white">{settings.maxDailyLoss > 0 ? `$${settings.maxDailyLoss}` : 'Disabled'}</span>
+                     )}
+                 </div>
+                 <div>
+                     <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Max Weekly Loss</p>
+                     {isEditingRisk ? (
+                         <div className="relative">
+                             <Input type="number" value={editedWeeklyRisk} onChange={(e) => setEditedWeeklyRisk(e.target.value)} placeholder="0" className="pl-6" />
+                             <span className="absolute left-2.5 top-2 text-slate-500">$</span>
+                         </div>
+                     ) : (
+                         <span className="text-xl font-medium text-white">{settings.maxWeeklyLoss > 0 ? `$${settings.maxWeeklyLoss}` : 'Disabled'}</span>
+                     )}
+                 </div>
+            </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -182,7 +257,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
             value={`$${stats.grossPnL}`} 
             icon={DollarSign} 
             trend={stats.grossPnL >= 0 ? 'up' : 'down'}
-            subtext="Net Profit"
+            subtext={`${roi}% ROI`}
         />
         <StatCard 
             title="Win Rate" 
@@ -198,10 +273,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
             trend={stats.profitFactor > 1.5 ? 'up' : 'down'}
         />
         <StatCard 
-            title="Avg R-Multiple" 
-            value={`${stats.averageR}R`} 
-            icon={TrendingDown}
-            trend={stats.averageR > 1 ? 'up' : 'down'}
+            title="Missed Opportunities" 
+            value={missedCount} 
+            icon={EyeOff}
+            trend="neutral"
+            subtext="Tracked"
         />
       </div>
 
@@ -231,28 +307,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
             </div>
         </div>
 
-        {/* Recent Activity */}
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
-            <h3 className="text-lg font-semibold text-white mb-6">Recent Trades</h3>
-            <div className="space-y-4">
-                {trades.slice(0, 5).map(trade => (
-                    <div key={trade.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-2 h-2 rounded-full ${trade.outcome === Outcome.WIN ? 'bg-emerald-500' : trade.outcome === Outcome.LOSS ? 'bg-rose-500' : 'bg-slate-500'}`} />
-                            <div>
-                                <p className="text-sm font-medium text-white">{trade.pair}</p>
-                                <p className="text-xs text-slate-500">{new Date(trade.date).toLocaleDateString()}</p>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                             <p className={`text-sm font-medium ${trade.pnl && trade.pnl > 0 ? 'text-emerald-500' : trade.pnl && trade.pnl < 0 ? 'text-rose-500' : 'text-slate-400'}`}>
-                                 {trade.pnl ? `$${trade.pnl.toLocaleString()}` : 'Open'}
-                             </p>
-                             <p className="text-xs text-slate-500">{trade.direction}</p>
-                        </div>
-                    </div>
-                ))}
-                {trades.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No trades logged yet.</p>}
+        {/* Streak & Stats */}
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 space-y-6">
+            <h3 className="text-lg font-semibold text-white">Current Form</h3>
+            
+            <div className="bg-slate-800/50 rounded-lg p-4 flex justify-between items-center">
+                <div>
+                    <p className="text-slate-400 text-xs uppercase font-bold">Current Streak</p>
+                    <p className={`text-2xl font-bold ${stats.currentStreak > 0 ? 'text-emerald-500' : stats.currentStreak < 0 ? 'text-rose-500' : 'text-slate-300'}`}>
+                        {Math.abs(stats.currentStreak)} {stats.currentStreak > 0 ? 'Wins' : stats.currentStreak < 0 ? 'Losses' : '-'}
+                    </p>
+                </div>
+                {stats.currentStreak > 0 ? <TrendingUp className="w-8 h-8 text-emerald-500/50" /> : <TrendingDown className="w-8 h-8 text-rose-500/50" />}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                 <div className="bg-slate-800/30 p-3 rounded-lg">
+                      <p className="text-slate-500 text-xs">Best Streak</p>
+                      <p className="text-lg font-semibold text-emerald-400">{stats.maxWinStreak} Wins</p>
+                 </div>
+                 <div className="bg-slate-800/30 p-3 rounded-lg">
+                      <p className="text-slate-500 text-xs">Worst Streak</p>
+                      <p className="text-lg font-semibold text-rose-400">{stats.maxLossStreak} Losses</p>
+                 </div>
+            </div>
+            
+            <div className="pt-4 border-t border-slate-800">
+                <p className="text-slate-400 text-xs uppercase font-bold mb-2">Max Drawdown</p>
+                <div className="flex items-end gap-2">
+                    <span className="text-2xl font-bold text-rose-500">-${stats.maxDrawdown}</span>
+                    <span className="text-slate-500 text-xs mb-1.5">from peak</span>
+                </div>
             </div>
         </div>
       </div>

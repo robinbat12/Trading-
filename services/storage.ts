@@ -17,6 +17,9 @@ const detectMistakes = (trade: Trade, pastTrades: Trade[]): string[] => {
     // Start with manual mistakes (exclude previous auto-detected ones to allow re-calculation)
     let detected: string[] = (trade.mistakes || []).filter(m => !AUTO_DETECTED_MISTAKES.includes(m));
     
+    // Skip detection for missed trades
+    if (trade.outcome === Outcome.MISSED) return detected;
+
     // 1. Poor R/R (< 1:1)
     if (trade.takeProfit && trade.stopLoss && trade.entryPrice) {
         const risk = Math.abs(trade.entryPrice - trade.stopLoss);
@@ -34,7 +37,7 @@ const detectMistakes = (trade: Trade, pastTrades: Trade[]): string[] => {
     // 3. Overtrading (More than 5 trades in same day)
     if (trade.date) {
         const tradeDate = new Date(trade.date).toDateString();
-        const tradesToday = pastTrades.filter(t => new Date(t.date).toDateString() === tradeDate && t.id !== trade.id).length;
+        const tradesToday = pastTrades.filter(t => new Date(t.date).toDateString() === tradeDate && t.id !== trade.id && t.outcome !== Outcome.MISSED).length;
         if (tradesToday >= 5) {
             detected.push('Overtrading');
         }
@@ -85,7 +88,12 @@ export const deleteTrade = (id: string): Trade[] => {
 // --- User Settings ---
 export const getUserSettings = (): UserSettings => {
   const data = localStorage.getItem(SETTINGS_KEY);
-  return data ? JSON.parse(data) : { initialCapital: 10000, currency: 'USD' };
+  return data ? JSON.parse(data) : { 
+      initialCapital: 10000, 
+      currency: 'USD',
+      maxDailyLoss: 0,
+      maxWeeklyLoss: 0
+  };
 };
 
 export const saveUserSettings = (settings: UserSettings): UserSettings => {
@@ -138,10 +146,9 @@ export const calculateTradeMetrics = (
   }
 
   const riskPerShare = Math.abs(entry - stopLoss);
-  const rewardPerShare = Math.abs(exit - entry);
   
   // Avoid division by zero
-  const rMultiple = riskPerShare === 0 ? 0 : (pnl > 0 ? rewardPerShare / riskPerShare : -1 * (Math.abs(exit - entry) / riskPerShare));
+  const rMultiple = riskPerShare === 0 ? 0 : (pnl > 0 ? (Math.abs(exit - entry) / riskPerShare) : -1 * (Math.abs(exit - entry) / riskPerShare));
 
   let outcome = Outcome.BREAK_EVEN;
   if (pnl > 0) outcome = Outcome.WIN;
@@ -153,11 +160,30 @@ export const calculateTradeMetrics = (
   return { pnl, rMultiple, outcome };
 };
 
+export const calculateDuration = (start: string, end: string): string => {
+    if (!start || !end) return '';
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const diff = endDate.getTime() - startDate.getTime();
+    
+    if (diff < 0) return '';
+
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days}d ${hours % 24}h`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    return `${minutes}m`;
+};
+
 // --- Analytics Helpers ---
 
 export const getGlobalStats = (trades: Trade[]): TradeStats => {
-    const closedTrades = trades.filter(t => t.outcome !== Outcome.OPEN);
+    // Exclude Missed trades from stats
+    const closedTrades = trades.filter(t => t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const wins = closedTrades.filter(t => t.outcome === Outcome.WIN);
+    const losses = closedTrades.filter(t => t.outcome === Outcome.LOSS);
     const totalTrades = closedTrades.length;
     const winRate = totalTrades ? (wins.length / totalTrades) * 100 : 0;
     const grossPnL = closedTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
@@ -165,8 +191,54 @@ export const getGlobalStats = (trades: Trade[]): TradeStats => {
     
     // Profit Factor (Gross Win / Gross Loss)
     const grossWin = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
-    const grossLoss = Math.abs(closedTrades.filter(t => t.outcome === Outcome.LOSS).reduce((acc, t) => acc + (t.pnl || 0), 0));
-    const profitFactor = grossLoss === 0 ? grossWin : grossWin / grossLoss;
+    const grossLoss = Math.abs(losses.reduce((acc, t) => acc + (t.pnl || 0), 0));
+    const profitFactor = grossLoss === 0 ? (grossWin === 0 ? 0 : 99.99) : grossWin / grossLoss;
+
+    // Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
+    const avgWin = wins.length > 0 ? grossWin / wins.length : 0;
+    const avgLoss = losses.length > 0 ? grossLoss / losses.length : 0;
+    const expectancy = (avgWin * (winRate/100)) - (avgLoss * (1 - (winRate/100)));
+
+    // Streaks
+    let currentStreak = 0;
+    let maxWinStreak = 0;
+    let maxLossStreak = 0;
+    let tempWin = 0;
+    let tempLoss = 0;
+
+    for (const t of closedTrades) {
+        if (t.outcome === Outcome.WIN) {
+            tempWin++;
+            tempLoss = 0;
+            if (currentStreak < 0) currentStreak = 1;
+            else currentStreak++;
+        } else if (t.outcome === Outcome.LOSS) {
+            tempLoss++;
+            tempWin = 0;
+            if (currentStreak > 0) currentStreak = -1;
+            else currentStreak--;
+        } else {
+             // Break even resets temp but maintains current streak sense usually
+             // We will reset for strict streak tracking
+             tempWin = 0;
+             tempLoss = 0;
+             currentStreak = 0;
+        }
+        maxWinStreak = Math.max(maxWinStreak, tempWin);
+        maxLossStreak = Math.max(maxLossStreak, tempLoss);
+    }
+
+    // Max Drawdown (Dollar Terms)
+    let peak = 0;
+    let maxDD = 0;
+    let runningPnL = 0;
+
+    for (const t of closedTrades) {
+        runningPnL += (t.pnl || 0);
+        if (runningPnL > peak) peak = runningPnL;
+        const dd = peak - runningPnL;
+        if (dd > maxDD) maxDD = dd;
+    }
 
     return {
       totalTrades,
@@ -176,16 +248,27 @@ export const getGlobalStats = (trades: Trade[]): TradeStats => {
       profitFactor: parseFloat(profitFactor.toFixed(2)),
       bestTrade: Math.max(...closedTrades.map(t => t.pnl || 0), 0),
       worstTrade: Math.min(...closedTrades.map(t => t.pnl || 0), 0),
+      expectancy: parseFloat(expectancy.toFixed(2)),
+      maxDrawdown: parseFloat(maxDD.toFixed(2)),
+      currentStreak,
+      maxWinStreak,
+      maxLossStreak
     };
 };
 
 export const getGroupedStats = (trades: Trade[], key: keyof Trade) => {
     const groups: Record<string, { wins: number, total: number, pnl: number, r: number }> = {};
     
-    trades.filter(t => t.outcome !== Outcome.OPEN).forEach(t => {
-        const values = Array.isArray(t[key]) ? t[key] as string[] : [t[key] as string];
-        // If empty array, group as 'Unknown'
-        const safeValues = values.length > 0 ? values : ['Unknown'];
+    // Exclude Missed trades from grouping stats (PnL/Winrate)
+    trades.filter(t => t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED).forEach(t => {
+        const value = t[key];
+        let safeValues: string[] = ['Unknown'];
+        
+        if (Array.isArray(value)) {
+             safeValues = value.length > 0 ? value : ['Unknown'];
+        } else if (typeof value === 'string' && value) {
+             safeValues = [value];
+        }
 
         safeValues.forEach(val => {
              if (!groups[val]) groups[val] = { wins: 0, total: 0, pnl: 0, r: 0 };
@@ -203,6 +286,90 @@ export const getGroupedStats = (trades: Trade[], key: keyof Trade) => {
         netPnL: stat.pnl,
         avgR: stat.total ? stat.r / stat.total : 0
     })).sort((a,b) => b.winRate - a.winRate);
+};
+
+// Generate Data for Calendar Heatmap
+export const getCalendarHeatmap = (trades: Trade[], days: number = 30) => {
+    const today = new Date();
+    const map = new Map<string, number>();
+    
+    // Initialize last 30 days with 0
+    for(let i = 0; i < days; i++) {
+        const d = new Date();
+        d.setDate(today.getDate() - i);
+        map.set(d.toDateString(), 0);
+    }
+
+    trades.filter(t => t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED).forEach(t => {
+        const dateStr = new Date(t.date).toDateString();
+        if (map.has(dateStr)) {
+            map.set(dateStr, (map.get(dateStr) || 0) + (t.pnl || 0));
+        }
+    });
+
+    // Convert to array
+    const result = [];
+    for(let i = days - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(today.getDate() - i);
+        const dateStr = d.toDateString();
+        result.push({
+            date: dateStr,
+            day: d.getDate(),
+            value: map.get(dateStr) || 0
+        });
+    }
+    return result;
+};
+
+// Generate Data for Drawdown Chart
+export const calculateDrawdownSeries = (trades: Trade[], initialCapital: number) => {
+    const sorted = [...trades]
+        .filter(t => t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED)
+        .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    let peakEquity = initialCapital;
+    let currentEquity = initialCapital;
+    const series = [{ date: 'Start', drawdown: 0, percentage: 0 }];
+
+    sorted.forEach(t => {
+        currentEquity += (t.pnl || 0);
+        if (currentEquity > peakEquity) peakEquity = currentEquity;
+        const dd = peakEquity - currentEquity;
+        const ddPct = peakEquity > 0 ? (dd / peakEquity) * 100 : 0;
+        
+        series.push({
+            date: new Date(t.date).toLocaleDateString(undefined, {month:'short', day:'numeric'}),
+            drawdown: -dd, // negative for chart visual
+            percentage: -ddPct
+        });
+    });
+    return series;
+};
+
+// Risk Rules Checker
+export const checkRiskRules = (trades: Trade[], settings: UserSettings) => {
+    const today = new Date().toDateString();
+    
+    // Daily PnL
+    const todaysTrades = trades.filter(t => new Date(t.date).toDateString() === today && t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED);
+    const dailyPnL = todaysTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
+    
+    // Weekly PnL (Simplified: Last 7 days)
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const weeklyTrades = trades.filter(t => new Date(t.date) > weekAgo && t.outcome !== Outcome.OPEN && t.outcome !== Outcome.MISSED);
+    const weeklyPnL = weeklyTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
+
+    const violations = [];
+    if (settings.maxDailyLoss > 0 && dailyPnL <= -Math.abs(settings.maxDailyLoss)) {
+        violations.push({ rule: 'Max Daily Loss', limit: settings.maxDailyLoss, current: dailyPnL });
+    }
+    if (settings.maxWeeklyLoss > 0 && weeklyPnL <= -Math.abs(settings.maxWeeklyLoss)) {
+        violations.push({ rule: 'Max Weekly Loss', limit: settings.maxWeeklyLoss, current: weeklyPnL });
+    }
+
+    return violations;
 };
 
 // Mock Auth

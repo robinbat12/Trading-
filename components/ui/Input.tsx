@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Plus } from 'lucide-react';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -69,6 +70,8 @@ interface TagSelectorProps {
 }
 
 export const TagSelector: React.FC<TagSelectorProps> = ({ label, options, selected, onChange, allowCustom = false }) => {
+    const [customTag, setCustomTag] = useState('');
+
     const toggleTag = (tag: string) => {
         if (selected.includes(tag)) {
             onChange(selected.filter(t => t !== tag));
@@ -77,10 +80,18 @@ export const TagSelector: React.FC<TagSelectorProps> = ({ label, options, select
         }
     };
 
+    const handleAddCustom = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (customTag.trim() && !selected.includes(customTag.trim())) {
+            onChange([...selected, customTag.trim()]);
+            setCustomTag('');
+        }
+    };
+
     return (
         <div className="w-full">
             {label && <label className="block text-xs font-medium text-slate-400 mb-2">{label}</label>}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-2">
                 {options.map(tag => (
                     <button
                         key={tag}
@@ -95,7 +106,44 @@ export const TagSelector: React.FC<TagSelectorProps> = ({ label, options, select
                         {tag}
                     </button>
                 ))}
+                {/* Render selected custom tags that are NOT in options */}
+                {selected.filter(t => !options.includes(t)).map(tag => (
+                    <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className="px-3 py-1 rounded-full text-xs font-medium border bg-emerald-600/20 border-emerald-500 text-emerald-400"
+                    >
+                        {tag}
+                    </button>
+                ))}
             </div>
+            
+            {allowCustom && (
+                <div className="flex items-center gap-2 mt-2">
+                    <input 
+                        type="text" 
+                        value={customTag}
+                        onChange={(e) => setCustomTag(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddCustom(e);
+                            }
+                        }}
+                        placeholder="Add custom tag..." 
+                        className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:border-emerald-500 focus:outline-none w-32"
+                    />
+                    <button 
+                        type="button"
+                        onClick={handleAddCustom}
+                        disabled={!customTag.trim()}
+                        className="p-1 rounded bg-slate-700 text-slate-300 hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+                    >
+                        <Plus className="w-3 h-3" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
