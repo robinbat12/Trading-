@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, BookOpen, LineChart, LogOut, Hexagon, Calculator, Activity } from 'lucide-react';
-import { logout } from '../services/auth';
+import { LayoutDashboard, BookOpen, LineChart, LogOut, Hexagon, Calculator } from 'lucide-react';
+import { logoutUser } from '../services/storage';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,16 +13,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    logout();
+    logoutUser();
     onLogout();
-    navigate('/auth');
+    navigate('/');
   };
 
   const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { name: 'Journal', icon: BookOpen, path: '/journal' },
     { name: 'Calculator', icon: Calculator, path: '/calculator' },
-    { name: 'Capital', icon: Activity, path: '/capital' },
     { name: 'Analytics', icon: LineChart, path: '/analytics' },
   ];
 

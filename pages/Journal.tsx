@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Download, Trash2, Edit2, ExternalLink, ChevronDown, Tag, Clock, AlertTriangle } from 'lucide-react';
+import { Plus, Download, Trash2, Edit2, ExternalLink, ChevronDown, Tag, Clock, AlertTriangle, Calculator, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input, Select, Textarea, TagSelector } from '../components/ui/Input';
-import { Trade, Direction, Outcome, STANDARD_SETUPS, TIMEFRAMES, EMOTIONS, MISTAKES, TradeStatus } from '../types';
+import { Trade, Direction, Outcome, STANDARD_SETUPS, TIMEFRAMES, EMOTIONS, MISTAKES } from '../types';
 import { calculateTradeMetrics } from '../services/storage';
-import { findNewsForTrade } from '../services/news';
 
 interface JournalProps {
   trades: Trade[];
@@ -19,8 +19,6 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOutcome, setFilterOutcome] = useState('All');
   const [filterSetup, setFilterSetup] = useState('All');
-  const [filterCapitalImpact, setFilterCapitalImpact] = useState<'All' | 'Impacting' | 'Excluded'>('All');
-  const [filterFromWatchlist, setFilterFromWatchlist] = useState<'All' | 'Watchlist' | 'Manual'>('All');
   
   // Form State
   const initialFormState: Partial<Trade> = {
@@ -30,12 +28,21 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
     setups: [],
     timeframes: [],
     emotions: [],
-    mistakes: [],
-    capitalImpacting: true,
-    status: 'Open'
+    mistakes: []
   };
   const [formData, setFormData] = useState<Partial<Trade>>(initialFormState);
-  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+
+  // Live PnL Preview
+  const previewMetrics = useMemo(() => {
+    if (!formData.entryPrice || !formData.positionSize) return null;
+    return calculateTradeMetrics(
+        formData.direction as Direction,
+        Number(formData.entryPrice),
+        formData.exitPrice ? Number(formData.exitPrice) : undefined,
+        Number(formData.stopLoss),
+        Number(formData.positionSize)
+    );
+  }, [formData.direction, formData.entryPrice, formData.exitPrice, formData.stopLoss, formData.positionSize]);
 
   // Effect to handle URL params (from Calculator or New button)
   useEffect(() => {
@@ -70,7 +77,7 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Auto calculate before save
+    // Final Calculation check
     const metrics = calculateTradeMetrics(
         formData.direction as Direction,
         Number(formData.entryPrice),
@@ -78,11 +85,6 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
         Number(formData.stopLoss),
         Number(formData.positionSize)
     );
-
-    // News tagging
-    const newsEvents = formData.pair && formData.date
-      ? findNewsForTrade(formData.pair, formData.date)
-      : [];
 
     const newTrade: Trade = {
         id: formData.id || crypto.randomUUID(),
@@ -103,28 +105,17 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
         timeframes: formData.timeframes || [],
         emotions: formData.emotions || [],
         mistakes: formData.mistakes || [],
-        capitalImpacting: formData.capitalImpacting !== false,
-        status: (formData.status as TradeStatus) || 'Open',
-        reasonForExit: formData.reasonForExit || '',
-        beforeScreenshotUrl: formData.beforeScreenshotUrl,
-        afterScreenshotUrl: formData.afterScreenshotUrl,
-        mediaUrl: formData.mediaUrl,
-        fromWatchlist: formData.fromWatchlist || false,
-        newsAffected: newsEvents.length > 0,
-        newsEventIds: newsEvents.map((n) => n.news_id),
         ...metrics
     };
 
     onSave(newTrade);
     setIsFormOpen(false);
     setFormData(initialFormState);
-    setEditingTrade(null);
     setSearchParams({}); // Clear params
   };
 
   const handleEdit = (trade: Trade) => {
       setFormData(trade);
-      setEditingTrade(trade);
       setIsFormOpen(true);
   };
 
@@ -133,21 +124,7 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
       const matchesSearch = t.pair.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesOutcome = filterOutcome === 'All' || t.outcome === filterOutcome;
       const matchesSetup = filterSetup === 'All' || (t.setups && t.setups.includes(filterSetup));
-      const impacting = t.capitalImpacting !== false; // default true when undefined
-      const matchesCapital =
-        filterCapitalImpact === 'All'
-          ? true
-          : filterCapitalImpact === 'Impacting'
-          ? impacting
-          : !impacting;
-      const fromWatch = t.fromWatchlist === true;
-      const matchesWatch =
-        filterFromWatchlist === 'All'
-          ? true
-          : filterFromWatchlist === 'Watchlist'
-          ? fromWatch
-          : !fromWatch;
-      return matchesSearch && matchesOutcome && matchesSetup && matchesCapital && matchesWatch;
+      return matchesSearch && matchesOutcome && matchesSetup;
   }).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -193,26 +170,6 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
             ]}
             value={filterSetup}
             onChange={(e) => setFilterSetup(e.target.value)}
-            className="md:w-48"
-          />
-          <Select
-            options={[
-              { value: 'All', label: 'All Trades' },
-              { value: 'Impacting', label: 'Capital-Impacting Only' },
-              { value: 'Excluded', label: 'Excluded from Capital' },
-            ]}
-            value={filterCapitalImpact}
-            onChange={(e) => setFilterCapitalImpact(e.target.value as any)}
-            className="md:w-56"
-          />
-          <Select
-            options={[
-              { value: 'All', label: 'All Sources' },
-              { value: 'Watchlist', label: 'From Watchlist' },
-              { value: 'Manual', label: 'Manual Only' },
-            ]}
-            value={filterFromWatchlist}
-            onChange={(e) => setFilterFromWatchlist(e.target.value as any)}
             className="md:w-48"
           />
       </div>
@@ -261,7 +218,17 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                 <form onSubmit={handleSubmit} className="space-y-8">
                     {/* Execution Section */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800 pb-2">Execution Details</h4>
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Execution Details</h4>
+                             {/* PnL Preview Badge */}
+                             {previewMetrics && previewMetrics.outcome !== Outcome.OPEN && (
+                                 <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${previewMetrics.pnl > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                     {previewMetrics.pnl > 0 ? <CheckCircle className="w-3 h-3"/> : <XCircle className="w-3 h-3"/>}
+                                     Projected: {previewMetrics.outcome} (${previewMetrics.pnl.toFixed(2)})
+                                 </div>
+                             )}
+                        </div>
+                        
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <Input type="datetime-local" label="Date/Time" name="date" required value={formData.date} onChange={handleInputChange} />
                             <Input label="Pair" name="pair" placeholder="e.g. BTC/USD" required value={formData.pair} onChange={handleInputChange} />
@@ -278,9 +245,38 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                             <Input type="number" step="any" label="Position Size" name="positionSize" required value={formData.positionSize} onChange={handleInputChange} />
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                             <Input type="number" step="any" label="Exit Price (Optional)" name="exitPrice" value={formData.exitPrice || ''} onChange={handleInputChange} placeholder="Leave empty if open" />
-                             <Input type="number" step="0.1" label="Risk % (Reference)" name="riskAmount" value={formData.riskAmount} onChange={handleInputChange} />
+                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
+                             <h5 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2">
+                                 <Calculator className="w-4 h-4 text-emerald-500" /> Close Trade / Outcome
+                             </h5>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                 <div>
+                                    <Input 
+                                        type="number" 
+                                        step="any" 
+                                        label="Exit Price" 
+                                        name="exitPrice" 
+                                        value={formData.exitPrice || ''} 
+                                        onChange={handleInputChange} 
+                                        placeholder="Enter price to close trade" 
+                                        className={formData.exitPrice ? "border-emerald-500 ring-1 ring-emerald-500/50" : ""}
+                                    />
+                                    <p className="text-xs text-slate-500 mt-2">Entering an exit price will automatically calculate PnL and set the outcome.</p>
+                                 </div>
+                                 <div className="flex flex-col justify-end">
+                                     <div className="p-3 bg-slate-800 rounded-lg flex justify-between items-center border border-slate-700">
+                                         <span className="text-sm text-slate-400">Result:</span>
+                                         <span className={`font-bold ${
+                                             !previewMetrics || previewMetrics.outcome === Outcome.OPEN ? 'text-slate-500' : 
+                                             previewMetrics.pnl > 0 ? 'text-emerald-500' : 'text-rose-500'
+                                         }`}>
+                                             {previewMetrics && previewMetrics.outcome !== Outcome.OPEN 
+                                                ? `${previewMetrics.outcome.toUpperCase()} (${previewMetrics.pnl > 0 ? '+' : ''}${previewMetrics.pnl.toFixed(2)})` 
+                                                : 'OPEN'}
+                                         </span>
+                                     </div>
+                                 </div>
+                             </div>
                         </div>
                     </div>
 
@@ -330,44 +326,6 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <Input label="Screenshot URL" name="screenshotUrl" value={formData.screenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
                             <Input label="TradingView Link" name="tradingViewUrl" value={formData.tradingViewUrl || ''} onChange={handleInputChange} placeholder="https://tradingview.com/..." />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Input label="Before Screenshot URL" name="beforeScreenshotUrl" value={formData.beforeScreenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
-                            <Input label="After Screenshot URL" name="afterScreenshotUrl" value={formData.afterScreenshotUrl || ''} onChange={handleInputChange} placeholder="https://..." />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Textarea label="Reason for Exit" name="reasonForExit" rows={3} value={formData.reasonForExit || ''} onChange={handleInputChange} placeholder="Why you closed or adjusted the trade..." />
-                            <Input label="Media Link (Video/Other)" name="mediaUrl" value={formData.mediaUrl || ''} onChange={handleInputChange} placeholder="https://..." />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <Select
-                            label="Status"
-                            name="status"
-                            value={formData.status || 'Open'}
-                            onChange={handleInputChange}
-                            options={[
-                              { value: 'Open', label: 'Open' },
-                              { value: 'Closed', label: 'Closed' },
-                              { value: 'Missed', label: 'Missed' },
-                              { value: 'Invalidated', label: 'Invalidated' },
-                              { value: 'BreakEven', label: 'Break-even' },
-                              { value: 'Partial', label: 'Partial Close' },
-                            ]}
-                          />
-                        </div>
-                        <div className="flex items-center gap-2 pt-2">
-                          <input
-                            id="capitalImpacting"
-                            type="checkbox"
-                            checked={formData.capitalImpacting !== false}
-                            onChange={(e) =>
-                              setFormData(prev => ({ ...prev, capitalImpacting: e.target.checked }))
-                            }
-                            className="mr-2 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <label htmlFor="capitalImpacting" className="text-xs text-slate-400">
-                            Include this trade in capital & growth stats
-                          </label>
                         </div>
                     </div>
 

@@ -1,4 +1,5 @@
-import React, { useMemo, useEffect, useState } from 'react';
+
+import React, { useMemo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
     TrendingUp, 
@@ -8,83 +9,79 @@ import {
     Plus,
     ArrowUpRight,
     ArrowDownRight,
-    Bell
+    Wallet,
+    Edit2,
+    Check,
+    X
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { Trade, TradeStats, Outcome, NewsEvent } from '../types';
+import { Input } from '../components/ui/Input';
+import { Trade, TradeStats, Outcome, UserSettings } from '../types';
+import { getGlobalStats, getUserSettings, saveUserSettings } from '../services/storage';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { getUpcomingNews, getNewsRelevantToWatchlist, getImpactColor, markNewsNotified } from '../services/news';
 
 interface DashboardProps {
   trades: Trade[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
-  const [upcomingNews, setUpcomingNews] = useState<NewsEvent[]>([]);
-  const [watchlistNews, setWatchlistNews] = useState<NewsEvent[]>([]);
-  const [alertEvents, setAlertEvents] = useState<NewsEvent[]>([]);
+  const [settings, setSettings] = useState<UserSettings>({ initialCapital: 10000, currency: 'USD' });
+  const [isEditingCapital, setIsEditingCapital] = useState(false);
+  const [editedCapital, setEditedCapital] = useState('');
 
-  const stats: TradeStats = useMemo(() => {
-    const closedTrades = trades.filter(t => t.outcome !== Outcome.OPEN);
-    const wins = closedTrades.filter(t => t.outcome === Outcome.WIN);
-    const totalTrades = closedTrades.length;
-    const winRate = totalTrades ? (wins.length / totalTrades) * 100 : 0;
-    const grossPnL = closedTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
-    const avgR = totalTrades ? closedTrades.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / totalTrades : 0;
-    
-    // Profit Factor (Gross Win / Gross Loss)
-    const grossWin = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
-    const grossLoss = Math.abs(closedTrades.filter(t => t.outcome === Outcome.LOSS).reduce((acc, t) => acc + (t.pnl || 0), 0));
-    const profitFactor = grossLoss === 0 ? grossWin : grossWin / grossLoss;
-
-    return {
-      totalTrades,
-      winRate: parseFloat(winRate.toFixed(1)),
-      grossPnL: parseFloat(grossPnL.toFixed(2)),
-      averageR: parseFloat(avgR.toFixed(2)),
-      profitFactor: parseFloat(profitFactor.toFixed(2)),
-      bestTrade: Math.max(...closedTrades.map(t => t.pnl || 0), 0),
-      worstTrade: Math.min(...closedTrades.map(t => t.pnl || 0), 0),
-    };
-  }, [trades]);
-
-  // Load news and lightweight alerts
+  // Load settings on mount
   useEffect(() => {
-    const load = () => {
-      const list = getUpcomingNews(48);
-      setUpcomingNews(list);
-      setWatchlistNews(getNewsRelevantToWatchlist());
-
-      const now = Date.now();
-      const soonWindow = 60 * 60 * 1000; // 1h
-      const soonHighImpact = list.filter((e) => {
-        const t = new Date(e.timestamp).getTime();
-        return e.impact_level === 'high' && t - now > 0 && t - now <= soonWindow && !e.notified;
-      });
-      if (soonHighImpact.length) {
-        setAlertEvents(soonHighImpact);
-        markNewsNotified(soonHighImpact.map((e) => e.news_id));
-      }
-    };
-    load();
-    const id = window.setInterval(load, 5 * 60 * 1000);
-    return () => window.clearInterval(id);
+    setSettings(getUserSettings());
   }, []);
+
+  const stats: TradeStats = useMemo(() => getGlobalStats(trades), [trades]);
+
+  const currentCapital = useMemo(() => {
+    return settings.initialCapital + stats.grossPnL;
+  }, [settings.initialCapital, stats.grossPnL]);
+
+  const roi = useMemo(() => {
+    if (settings.initialCapital === 0) return 0;
+    return ((stats.grossPnL / settings.initialCapital) * 100).toFixed(2);
+  }, [stats.grossPnL, settings.initialCapital]);
 
   // Equity Curve Data
   const chartData = useMemo(() => {
-      let balance = 0;
-      return trades
+      let runningBalance = settings.initialCapital;
+      // Start point
+      const data = [
+          { date: 'Start', balance: settings.initialCapital, pnl: 0 }
+      ];
+      
+      const sortedTrades = [...trades]
         .filter(t => t.outcome !== Outcome.OPEN)
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-        .map(t => {
-            balance += (t.pnl || 0);
-            return {
-                date: new Date(t.date).toLocaleDateString(),
-                balance: balance
-            };
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      sortedTrades.forEach(t => {
+            runningBalance += (t.pnl || 0);
+            data.push({
+                date: new Date(t.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                balance: runningBalance,
+                pnl: t.pnl || 0
+            });
         });
-  }, [trades]);
+
+      return data;
+  }, [trades, settings.initialCapital]);
+
+  const handleSaveCapital = () => {
+    const val = parseFloat(editedCapital);
+    if (!isNaN(val) && val >= 0) {
+        const newSettings = { ...settings, initialCapital: val };
+        setSettings(saveUserSettings(newSettings));
+        setIsEditingCapital(false);
+    }
+  };
+
+  const startEditingCapital = () => {
+      setEditedCapital(settings.initialCapital.toString());
+      setIsEditingCapital(true);
+  };
 
   const StatCard = ({ title, value, subtext, icon: Icon, trend }: any) => (
     <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
@@ -99,9 +96,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
       </div>
       {subtext && (
           <div className="mt-4 flex items-center gap-1 text-sm">
-             {trend === 'up' ? <ArrowUpRight className="w-4 h-4 text-emerald-500"/> : <ArrowDownRight className="w-4 h-4 text-rose-500"/>}
-             <span className={trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}>{subtext}</span>
-             <span className="text-slate-500 ml-1">vs last month</span>
+             {trend === 'up' ? <ArrowUpRight className="w-4 h-4 text-emerald-500"/> : trend === 'down' ? <ArrowDownRight className="w-4 h-4 text-rose-500"/> : null}
+             <span className={trend === 'up' ? 'text-emerald-500' : trend === 'down' ? 'text-rose-500' : 'text-slate-500'}>{subtext}</span>
           </div>
       )}
     </div>
@@ -112,7 +108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Dashboard</h2>
-          <p className="text-slate-400">Welcome back, here's your trading overview.</p>
+          <p className="text-slate-400">Overview of your capital and performance.</p>
         </div>
         <Link to="/journal?new=true">
             <Button className="w-full md:w-auto gap-2">
@@ -122,20 +118,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
         </Link>
       </div>
 
+      {/* Capital Overview Section */}
+      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+          <div className="p-6 border-b border-slate-800 bg-slate-950/30">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Wallet className="w-5 h-5 text-emerald-500" /> Capital Management
+              </h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-800">
+              {/* Initial Capital */}
+              <div className="p-6">
+                  <p className="text-slate-400 text-sm font-medium mb-1">Initial Capital</p>
+                  <div className="flex items-center gap-3 h-10">
+                      {isEditingCapital ? (
+                          <div className="flex items-center gap-2 w-full">
+                              <Input 
+                                autoFocus
+                                type="number" 
+                                value={editedCapital} 
+                                onChange={(e) => setEditedCapital(e.target.value)}
+                                className="h-8 py-1"
+                              />
+                              <button onClick={handleSaveCapital} className="p-1.5 bg-emerald-600 rounded text-white hover:bg-emerald-500"><Check className="w-4 h-4"/></button>
+                              <button onClick={() => setIsEditingCapital(false)} className="p-1.5 bg-slate-700 rounded text-white hover:bg-slate-600"><X className="w-4 h-4"/></button>
+                          </div>
+                      ) : (
+                          <div className="flex items-center gap-3 group">
+                              <span className="text-2xl font-bold text-white">${settings.initialCapital.toLocaleString()}</span>
+                              <button onClick={startEditingCapital} className="text-slate-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Edit2 className="w-4 h-4" />
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+
+              {/* Realized PnL */}
+              <div className="p-6">
+                  <p className="text-slate-400 text-sm font-medium mb-1">Realized PnL</p>
+                  <div className="h-10 flex items-center">
+                      <span className={`text-2xl font-bold ${stats.grossPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {stats.grossPnL >= 0 ? '+' : ''}${stats.grossPnL.toLocaleString()}
+                      </span>
+                      <span className={`ml-3 text-sm px-2 py-0.5 rounded-full ${Number(roi) >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                          {Number(roi) >= 0 ? '+' : ''}{roi}% ROI
+                      </span>
+                  </div>
+              </div>
+
+              {/* Current Capital */}
+              <div className="p-6 bg-slate-800/20">
+                  <p className="text-slate-400 text-sm font-medium mb-1">Current Balance</p>
+                  <div className="h-10 flex items-center">
+                      <span className="text-3xl font-bold text-white">${currentCapital.toLocaleString()}</span>
+                  </div>
+              </div>
+          </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
             title="Total PnL" 
             value={`$${stats.grossPnL}`} 
             icon={DollarSign} 
             trend={stats.grossPnL >= 0 ? 'up' : 'down'}
-            subtext="12%"
+            subtext="Net Profit"
         />
         <StatCard 
             title="Win Rate" 
             value={`${stats.winRate}%`} 
             icon={TrendingUp}
             trend={stats.winRate > 50 ? 'up' : 'down'} 
-            subtext="2.1%"
+            subtext={`${stats.totalTrades} Trades`}
         />
         <StatCard 
             title="Profit Factor" 
@@ -151,27 +205,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
         />
       </div>
 
-      {/* High-impact news alert strip */}
-      {alertEvents.length > 0 && (
-        <div className="bg-amber-950/70 border border-amber-500/40 rounded-xl p-3 flex items-center gap-3">
-          <Bell className="w-4 h-4 text-amber-400" />
-          <div className="flex-1 text-xs text-amber-100">
-            High-impact news approaching:{' '}
-            {alertEvents.map((e, idx) => (
-              <span key={e.news_id}>
-                {idx > 0 && ', '}
-                {e.title} (
-                {new Date(e.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-                )
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Equity Curve */}
         <div className="lg:col-span-2 bg-slate-900 rounded-xl border border-slate-800 p-6">
@@ -186,10 +219,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
                             </linearGradient>
                         </defs>
                         <XAxis dataKey="date" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                        <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={(value) => `$${value}`} />
                         <Tooltip 
                             contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                             itemStyle={{ color: '#f8fafc' }}
+                            formatter={(value: any) => [`$${value.toLocaleString()}`, 'Balance']}
                         />
                         <Area type="monotone" dataKey="balance" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorBalance)" />
                     </AreaChart>
@@ -212,7 +246,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
                         </div>
                         <div className="text-right">
                              <p className={`text-sm font-medium ${trade.pnl && trade.pnl > 0 ? 'text-emerald-500' : trade.pnl && trade.pnl < 0 ? 'text-rose-500' : 'text-slate-400'}`}>
-                                 {trade.pnl ? `$${trade.pnl}` : 'Open'}
+                                 {trade.pnl ? `$${trade.pnl.toLocaleString()}` : 'Open'}
                              </p>
                              <p className="text-xs text-slate-500">{trade.direction}</p>
                         </div>
@@ -220,72 +254,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
                 ))}
                 {trades.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No trades logged yet.</p>}
             </div>
-        </div>
-
-        {/* Upcoming News */}
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 lg:col-span-1">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Upcoming News (48h)</h3>
-            <span className="text-xs text-slate-500">
-              {watchlistNews.length ? 'Watchlist-aware' : 'Global'}
-            </span>
-          </div>
-          {upcomingNews.length === 0 ? (
-            <p className="text-sm text-slate-500">No upcoming events loaded.</p>
-          ) : (
-            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-              {upcomingNews.slice(0, 8).map((event) => {
-                const localTime = new Date(event.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
-                const localDate = new Date(event.timestamp).toLocaleDateString();
-                const isWatchlist =
-                  watchlistNews.findIndex((w) => w.news_id === event.news_id) !== -1;
-                const impactColor = getImpactColor(event.impact_level);
-                return (
-                  <div
-                    key={event.news_id}
-                    className={`border border-slate-800 rounded-lg p-3 text-xs hover:border-slate-700 transition-colors ${
-                      isWatchlist ? 'bg-emerald-500/5' : 'bg-slate-900'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="inline-block w-2 h-2 rounded-full"
-                          style={{ backgroundColor: impactColor }}
-                        />
-                        <span className="font-medium text-slate-100 truncate max-w-[140px]">
-                          {event.title}
-                        </span>
-                      </div>
-                      <span className="text-slate-500">
-                        {localDate} {localTime}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                        {event.impact_level.toUpperCase()}
-                      </span>
-                      <span className="text-slate-400">
-                        {event.affected_assets.join(', ')}
-                      </span>
-                      {isWatchlist && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
-                          On Watchlist
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">
-                      {event.description}
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-600">Source: {event.source}</p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>

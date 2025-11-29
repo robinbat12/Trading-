@@ -1,21 +1,34 @@
 import React, { useMemo, useState } from 'react';
 import { Trade, TradeStats, Outcome } from '../types';
-import { getGroupedStats } from '../services/storage';
+import { getGroupedStats, getGlobalStats } from '../services/storage';
+import { generateTraderReport } from '../services/gemini';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { BrainCircuit, Clock, AlertTriangle, Crosshair, TrendingUp } from 'lucide-react';
+import { BrainCircuit, Clock, AlertTriangle, Crosshair, TrendingUp, Sparkles } from 'lucide-react';
+import { Button } from '../components/ui/Button';
+import ReactMarkdown from 'react-markdown';
 
 interface AnalyticsProps {
   trades: Trade[];
 }
 
 export const Analytics: React.FC<AnalyticsProps> = ({ trades }) => {
-  const [activeTab, setActiveTab] = useState<'strategies' | 'psychology' | 'patterns' | 'news'>('strategies');
+  const [activeTab, setActiveTab] = useState<'strategies' | 'psychology' | 'patterns'>('strategies');
+  const [report, setReport] = useState<string | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   // --- Derived Stats ---
+  const globalStats = useMemo(() => getGlobalStats(trades), [trades]);
   const setupStats = useMemo(() => getGroupedStats(trades, 'setups'), [trades]);
   const timeframeStats = useMemo(() => getGroupedStats(trades, 'timeframes'), [trades]);
   const emotionStats = useMemo(() => getGroupedStats(trades, 'emotions'), [trades]);
   const mistakeStats = useMemo(() => getGroupedStats(trades, 'mistakes'), [trades]);
+
+  // Recommended Setup
+  const bestSetup = useMemo(() => {
+    // Filter for reliable data (at least 2 trades) and sort by Win Rate then R
+    const valid = setupStats.filter(s => s.totalTrades >= 2).sort((a,b) => b.winRate - a.winRate || b.avgR - a.avgR);
+    return valid.length > 0 ? valid[0] : null;
+  }, [setupStats]);
 
   // Pattern Data (Day of Week)
   const dayStats = useMemo(() => {
@@ -54,26 +67,62 @@ export const Analytics: React.FC<AnalyticsProps> = ({ trades }) => {
       })).filter(h => h.total > 0); // Only show active hours
   }, [trades]);
 
+  const handleGenerateReport = async () => {
+    setLoadingReport(true);
+    const result = await generateTraderReport(trades, globalStats);
+    setReport(result);
+    setLoadingReport(false);
+  };
+
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Master Your Performance</h2>
-        <p className="text-slate-400">Deep dive into your strategies, psychology, and hidden patterns.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Master Your Performance</h2>
+          <p className="text-slate-400">Deep dive into your strategies, psychology, and hidden patterns.</p>
+        </div>
+      </div>
+
+      {/* AI Report Card Section */}
+      <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-emerald-500/30 rounded-xl p-6 relative overflow-hidden">
+           <div className="absolute top-0 right-0 p-4 opacity-10">
+               <Sparkles className="w-32 h-32 text-emerald-500" />
+           </div>
+           
+           <div className="relative z-10">
+               <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-emerald-500" /> AI Trader Report Card
+                    </h3>
+                    <Button onClick={handleGenerateReport} disabled={loadingReport || trades.length < 3} size="sm">
+                        {loadingReport ? 'Analyzing...' : 'Generate Report'}
+                    </Button>
+               </div>
+               
+               {report ? (
+                   <div className="prose prose-invert prose-sm max-w-none bg-slate-900/50 p-4 rounded-lg border border-slate-800">
+                       <ReactMarkdown>{report}</ReactMarkdown>
+                   </div>
+               ) : (
+                   <div className="text-slate-400 text-sm">
+                       {trades.length < 3 
+                         ? "Log at least 3 trades to generate your first AI report." 
+                         : "Click 'Generate Report' to get a personalized grade, strength analysis, and psychology review from Gemini AI."}
+                   </div>
+               )}
+           </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-800 space-x-6">
-          <button onClick={() => setActiveTab('strategies')} className={`pb-4 text-sm font-medium transition-colors ${activeTab === 'strategies' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-white'}`}>
+      <div className="flex border-b border-slate-800 space-x-6 overflow-x-auto">
+          <button onClick={() => setActiveTab('strategies')} className={`pb-4 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'strategies' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-white'}`}>
               Strategy & Timeframes
           </button>
-          <button onClick={() => setActiveTab('psychology')} className={`pb-4 text-sm font-medium transition-colors ${activeTab === 'psychology' ? 'text-purple-500 border-b-2 border-purple-500' : 'text-slate-400 hover:text-white'}`}>
+          <button onClick={() => setActiveTab('psychology')} className={`pb-4 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'psychology' ? 'text-purple-500 border-b-2 border-purple-500' : 'text-slate-400 hover:text-white'}`}>
               Psychology & Mistakes
           </button>
-          <button onClick={() => setActiveTab('patterns')} className={`pb-4 text-sm font-medium transition-colors ${activeTab === 'patterns' ? 'text-blue-500 border-b-2 border-blue-500' : 'text-slate-400 hover:text-white'}`}>
+          <button onClick={() => setActiveTab('patterns')} className={`pb-4 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'patterns' ? 'text-blue-500 border-b-2 border-blue-500' : 'text-slate-400 hover:text-white'}`}>
               Pattern Recognition
-          </button>
-          <button onClick={() => setActiveTab('news')} className={`pb-4 text-sm font-medium transition-colors ${activeTab === 'news' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-slate-400 hover:text-white'}`}>
-              News Impact
           </button>
       </div>
 
@@ -83,6 +132,26 @@ export const Analytics: React.FC<AnalyticsProps> = ({ trades }) => {
           {/* --- STRATEGIES TAB --- */}
           {activeTab === 'strategies' && (
               <div className="space-y-8 animate-fadeIn">
+                  
+                  {/* Recommended Setup Card */}
+                  {bestSetup && (
+                      <div className="bg-emerald-900/10 border border-emerald-500/20 rounded-xl p-4 flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                              <div className="bg-emerald-500/20 p-3 rounded-full">
+                                  <Crosshair className="w-6 h-6 text-emerald-500" />
+                              </div>
+                              <div>
+                                  <h4 className="text-emerald-400 font-bold text-sm uppercase tracking-wider">Top Performing Setup</h4>
+                                  <p className="text-xl font-bold text-white">{bestSetup.name}</p>
+                              </div>
+                          </div>
+                          <div className="text-right hidden md:block">
+                              <p className="text-emerald-400 font-bold text-xl">{bestSetup.winRate.toFixed(1)}% WR</p>
+                              <p className="text-slate-400 text-sm">{bestSetup.avgR.toFixed(2)}R Avg</p>
+                          </div>
+                      </div>
+                  )}
+
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                       {/* Setup Performance */}
                       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -244,114 +313,6 @@ export const Analytics: React.FC<AnalyticsProps> = ({ trades }) => {
                                       <Bar dataKey="winRate" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                                   </BarChart>
                               </ResponsiveContainer>
-                          </div>
-                      </div>
-                  </div>
-              </div>
-          )}
-
-          {/* --- NEWS TAB --- */}
-          {activeTab === 'news' && (
-              <div className="space-y-8 animate-fadeIn">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                          <h4 className="text-lg font-semibold text-white mb-4">Performance Around News</h4>
-                          {(() => {
-                            const newsTrades = trades.filter(t => t.newsAffected);
-                            const normalTrades = trades.filter(t => !t.newsAffected);
-                            const closedNews = newsTrades.filter(t => t.outcome !== Outcome.OPEN);
-                            const closedNormal = normalTrades.filter(t => t.outcome !== Outcome.OPEN);
-
-                            const calc = (list: Trade[]): { winRate: number; avgR: number } => {
-                              if (!list.length) return { winRate: 0, avgR: 0 };
-                              const wins = list.filter(t => t.outcome === Outcome.WIN).length;
-                              const winRate = (wins / list.length) * 100;
-                              const avgR = list.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / list.length;
-                              return { winRate, avgR };
-                            };
-
-                            const newsStats = calc(closedNews);
-                            const normalStats = calc(closedNormal);
-
-                            return (
-                              <div className="space-y-4 text-sm">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-slate-400">Trades tagged as News-Affected</span>
-                                  <span className="text-slate-100 font-medium">{closedNews.length}</span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="bg-slate-800/60 rounded-lg p-3">
-                                    <p className="text-xs text-slate-400 mb-1">News-Affected</p>
-                                    <p className="text-sm text-slate-100">
-                                      Win Rate:{' '}
-                                      <span className={newsStats.winRate >= normalStats.winRate ? 'text-emerald-400' : 'text-rose-400'}>
-                                        {newsStats.winRate.toFixed(1)}%
-                                      </span>
-                                    </p>
-                                    <p className="text-sm text-slate-100">
-                                      Avg R:{' '}
-                                      <span className={newsStats.avgR >= normalStats.avgR ? 'text-emerald-400' : 'text-rose-400'}>
-                                        {newsStats.avgR.toFixed(2)}R
-                                      </span>
-                                    </p>
-                                  </div>
-                                  <div className="bg-slate-800/30 rounded-lg p-3">
-                                    <p className="text-xs text-slate-400 mb-1">Normal Trades</p>
-                                    <p className="text-sm text-slate-100">
-                                      Win Rate: {normalStats.winRate.toFixed(1)}%
-                                    </p>
-                                    <p className="text-sm text-slate-100">
-                                      Avg R: {normalStats.avgR.toFixed(2)}R
-                                    </p>
-                                  </div>
-                                </div>
-                                {closedNews.length === 0 && (
-                                  <p className="text-xs text-slate-500 mt-2">
-                                    Tag trades that occur near major news to see impact stats here.
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })()}
-                      </div>
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                          <h4 className="text-lg font-semibold text-white mb-4">Recent News-Affected Trades</h4>
-                          <div className="space-y-3 text-xs max-h-72 overflow-y-auto pr-1">
-                            {trades.filter(t => t.newsAffected).slice(0, 10).map(t => (
-                              <div key={t.id} className="border border-slate-800 rounded-lg p-3">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium text-slate-100">{t.pair}</span>
-                                  <span className="text-slate-500">
-                                    {new Date(t.date).toLocaleDateString()} {new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-slate-400">
-                                  Outcome:{' '}
-                                  <span className={
-                                    t.outcome === Outcome.WIN
-                                      ? 'text-emerald-400'
-                                      : t.outcome === Outcome.LOSS
-                                      ? 'text-rose-400'
-                                      : 'text-slate-300'
-                                  }>
-                                    {t.outcome}
-                                  </span>
-                                  {t.pnl !== undefined && (
-                                    <> · PnL: <span className={t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${t.pnl.toFixed(2)}</span></>
-                                  )}
-                                </p>
-                                {t.reason && (
-                                  <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">
-                                    {t.reason}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                            {trades.filter(t => t.newsAffected).length === 0 && (
-                              <p className="text-slate-500 text-center py-6">
-                                No trades currently tagged as news-affected.
-                              </p>
-                            )}
                           </div>
                       </div>
                   </div>
