@@ -245,6 +245,7 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                             <Input type="number" step="any" label="Position Size" name="positionSize" required value={formData.positionSize} onChange={handleInputChange} />
                         </div>
                         
+                        {/* CLOSE TRADE SECTION */}
                         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
                              <h5 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2">
                                  <Calculator className="w-4 h-4 text-emerald-500" /> Close Trade / Outcome
@@ -266,14 +267,21 @@ export const Journal: React.FC<JournalProps> = ({ trades, onSave, onDelete }) =>
                                  <div className="flex flex-col justify-end">
                                      <div className="p-3 bg-slate-800 rounded-lg flex justify-between items-center border border-slate-700">
                                          <span className="text-sm text-slate-400">Result:</span>
-                                         <span className={`font-bold ${
-                                             !previewMetrics || previewMetrics.outcome === Outcome.OPEN ? 'text-slate-500' : 
-                                             previewMetrics.pnl > 0 ? 'text-emerald-500' : 'text-rose-500'
-                                         }`}>
-                                             {previewMetrics && previewMetrics.outcome !== Outcome.OPEN 
-                                                ? `${previewMetrics.outcome.toUpperCase()} (${previewMetrics.pnl > 0 ? '+' : ''}${previewMetrics.pnl.toFixed(2)})` 
-                                                : 'OPEN'}
-                                         </span>
+                                         <div className="flex items-center gap-2">
+                                            {/* UI Toggle for WIN/LOSS Visuals */}
+                                            {previewMetrics && previewMetrics.outcome !== Outcome.OPEN ? (
+                                                <span className={`flex items-center gap-1 font-bold ${
+                                                    previewMetrics.pnl > 0 ? 'text-emerald-500' : 'text-rose-500'
+                                                }`}>
+                                                    {previewMetrics.pnl > 0 ? 'WIN' : 'LOSS'}
+                                                    <span className="text-slate-500 font-normal ml-1">
+                                                        ({previewMetrics.pnl > 0 ? '+' : ''}{previewMetrics.pnl.toFixed(2)})
+                                                    </span>
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-500">OPEN</span>
+                                            )}
+                                         </div>
                                      </div>
                                  </div>
                              </div>

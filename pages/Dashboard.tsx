@@ -143,9 +143,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ trades }) => {
                               <button onClick={() => setIsEditingCapital(false)} className="p-1.5 bg-slate-700 rounded text-white hover:bg-slate-600"><X className="w-4 h-4"/></button>
                           </div>
                       ) : (
-                          <div className="flex items-center gap-3 group">
+                          <div className="flex items-center gap-3 group w-full">
                               <span className="text-2xl font-bold text-white">${settings.initialCapital.toLocaleString()}</span>
-                              <button onClick={startEditingCapital} className="text-slate-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={startEditingCapital} className="text-slate-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity ml-auto md:ml-2">
                                   <Edit2 className="w-4 h-4" />
                               </button>
                           </div>

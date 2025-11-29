@@ -126,7 +126,7 @@ export const calculateTradeMetrics = (
   size: number
 ) => {
   // If no exit price, trade is OPEN
-  if (exit === undefined || exit === null || isNaN(exit)) {
+  if (exit === undefined || exit === null || isNaN(exit) || exit === 0) {
       return { pnl: 0, rMultiple: 0, outcome: Outcome.OPEN };
   }
 
@@ -147,7 +147,7 @@ export const calculateTradeMetrics = (
   if (pnl > 0) outcome = Outcome.WIN;
   if (pnl < 0) outcome = Outcome.LOSS;
   
-  // Treat tiny PnL as Break Even (optional, but good for UX)
+  // Treat tiny PnL as Break Even
   if (Math.abs(pnl) < 0.01) outcome = Outcome.BREAK_EVEN;
 
   return { pnl, rMultiple, outcome };
